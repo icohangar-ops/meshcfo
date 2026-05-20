@@ -11,6 +11,11 @@ uses the four subsystems:
 Subclasses implement ``expand`` and ``compress`` — the rest is handled by the
 framework. Each turn emits a ``TurnResult`` which the orchestrator passes to
 the Bridge Framework.
+
+Governance: When EGIS AI is installed and activated, every LLM call made
+during agent execution is automatically governed (PII masking, content
+policies, tool-call safety, audit trail). Agent attribution is set via
+``set_context_for_mesh_agent`` before each turn.
 """
 from __future__ import annotations
 
@@ -26,6 +31,20 @@ from cme.protocol import (
     ExpansionStep,
     ReasoningTrace,
 )
+
+
+def _try_set_governance_context(agent_name: str) -> None:
+    """Set EGIS governance context for the current agent, if available.
+
+    This is a soft dependency — if egisai is not installed or governance
+    was not initialized, this is a silent no-op.
+    """
+    try:
+        from cme.governance import set_context_for_mesh_agent  # noqa: WPS433
+
+        set_context_for_mesh_agent(agent_name)
+    except Exception:
+        pass  # governance not available — proceed without it
 
 
 @dataclass
@@ -83,6 +102,9 @@ class MeshAgent:
         shared_context: ContextEngine,
         cycles: int = 1,
     ) -> TurnResult:
+        # Set EGIS governance context for this agent
+        _try_set_governance_context(self.name)
+
         ctx_snapshot = shared_context.snapshot_for(self.name, problem, k=6)
 
         # Expand + compress via protocol

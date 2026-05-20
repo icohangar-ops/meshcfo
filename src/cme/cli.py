@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List
@@ -19,6 +20,19 @@ from cme.chp import CHPOrchestrator, DecisionRegistry, Phase, ThirdPartyValidati
 from cme.context import ContextEngine, Entity, Task
 from cme.finance import CapitalAllocationInput, build_capital_allocation_case
 from cme.orchestrator import EnterpriseOrchestrator
+
+
+def _maybe_init_governance() -> None:
+    """Initialize EGIS governance if the SDK is available and enabled."""
+    enabled = os.getenv("EGISAI_ENABLED", "true").lower() == "true"
+    if not enabled:
+        return
+    try:
+        from cme.governance import init_governance  # noqa: WPS433
+
+        init_governance()
+    except Exception:
+        pass  # governance not available — proceed without it
 
 
 def _registry_path(args: argparse.Namespace) -> Path:
@@ -408,6 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: List[str] | None = None) -> int:
+    _maybe_init_governance()  # activate EGIS before any agent runs
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

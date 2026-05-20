@@ -24,6 +24,8 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+governance = ["egisai>=0.1.0"]
+all = ["egisai>=0.1.0", "pytest>=8.0"]
 
 [project.scripts]
 cfo-os = "cme.cli:main"
