@@ -35,6 +35,19 @@ def _maybe_init_governance() -> None:
         pass  # governance not available — proceed without it
 
 
+def _maybe_init_observability() -> None:
+    """Initialize AgentOps observability if available and enabled."""
+    enabled = os.getenv("AGENTOPS_ENABLED", "true").lower() == "true"
+    if not enabled:
+        return
+    try:
+        from cme.observability import init_observability  # noqa: WPS433
+
+        init_observability(tags=["meshcfo", "cli"])
+    except Exception:
+        pass
+
+
 def _registry_path(args: argparse.Namespace) -> Path:
     return Path(getattr(args, "registry", ".chp_registry.json"))
 
@@ -423,6 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: List[str] | None = None) -> int:
     _maybe_init_governance()  # activate EGIS before any agent runs
+    _maybe_init_observability()  # activate AgentOps cost tracking + session replay
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
