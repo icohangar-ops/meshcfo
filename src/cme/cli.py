@@ -21,6 +21,13 @@ from cme.context import ContextEngine, Entity, Task
 from cme.finance import CapitalAllocationInput, build_capital_allocation_case
 from cme.orchestrator import EnterpriseOrchestrator
 
+# --- Datadog LLM Observability (no-op unless DD_LLMOBS_ENABLED) ---
+# Explicit, unconditional activation so instrumentation depends only on the
+# documented DD_* env vars, independent of the AGENTOPS_ENABLED-gated hook below.
+from cme.observability import init_observability as _init_llm_obs
+
+_init_llm_obs("meshcfo")
+
 
 def _maybe_init_governance() -> None:
     """Initialize EGIS governance if the SDK is available and enabled."""

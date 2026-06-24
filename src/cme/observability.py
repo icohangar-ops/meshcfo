@@ -1,134 +1,76 @@
-"""AgentOps observability integration for MeshCFO.
+"""Datadog LLM Observability bootstrap for the Multi-Agent CFO OS.
 
-Provides cost tracking, session replay, and per-agent metrics via AgentOps.
-Soft dependency — if agentops is not installed, all calls are no-ops.
+This module backs the ``_maybe_init_observability()`` hook already wired into
+``cme.cli`` (gated by ``AGENTOPS_ENABLED``). It enables Datadog LLM
+Observability in *agentless* mode so that every OpenAI / Anthropic / CrewAI /
+openai-agents call the CFO agents make is captured as a span and shipped to
+Datadog -- no Datadog Agent process required.
 
-Usage:
-    from cme.observability import init_observability, track_agent_turn
+It is a no-op unless ``DD_LLMOBS_ENABLED`` is truthy, so local development,
+tests and CI are unaffected, and it degrades gracefully (a warning, not a
+crash) if ``ddtrace`` is not installed.
 
-    init_observability(api_key="your-key")  # or set AGENTOPS_API_KEY env var
-    # Then in your agent loop:
-    with track_agent_turn("finance", "FY26 forecast") as session:
-        result = agent.act(problem, shared_context=ctx)
+Enable it by setting these environment variables in your deployment:
+
+    DD_LLMOBS_ENABLED=1
+    DD_API_KEY=<your Datadog API key>
+    DD_SITE=us5.datadoghq.com          # must match your Datadog org's site
+    DD_LLMOBS_ML_APP=<app name>        # optional; defaults to "meshcfo"
+
+The ml_app name is what the AgentOps dashboard groups traces by in its
+"By App" breakdown. ``tags`` (passed by the CLI hook) are attached to every
+LLM Obs span so they are filterable in the dashboard.
 """
 from __future__ import annotations
 
-import functools
-import time
-from contextlib import contextmanager
-from typing import Any, Dict, Optional
+import logging
+import os
+from typing import Optional, Sequence
 
-_AGENTOPS_AVAILABLE = False
-try:
-    import agentops
+_log = logging.getLogger("cme.observability")
+_initialized = False
 
-    _AGENTOPS_AVAILABLE = True
-except ImportError:
-    pass
+
+def _truthy(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def init_observability(
-    api_key: Optional[str] = None,
-    tags: Optional[list] = None,
-    default_params: Optional[Dict[str, Any]] = None,
+    default_ml_app: str = "meshcfo",
+    tags: Optional[Sequence[str]] = None,
+    **_ignored: object,
 ) -> bool:
-    """Initialize AgentOps for MeshCFO observability.
+    """Enable Datadog LLM Observability once, if ``DD_LLMOBS_ENABLED`` is set.
 
-    Returns True if AgentOps was initialized, False otherwise.
+    ``default_ml_app`` is used when ``DD_LLMOBS_ML_APP`` is not set in the
+    environment. ``tags`` (e.g. ``["meshcfo", "cli"]``) are applied to every
+    span. Returns ``True`` if observability was activated, else ``False``.
     """
-    if not _AGENTOPS_AVAILABLE:
-        return False
-    try:
-        agentops.init(
-            api_key=api_key,
-            tags=tags or ["meshcfo", "multi-agent", "finance"],
-            default_params=default_params or {},
-        )
+    global _initialized
+    if _initialized:
         return True
-    except Exception:
+    if not _truthy(os.getenv("DD_LLMOBS_ENABLED")):
+        return False
+    try:
+        from ddtrace.llmobs import LLMObs
+    except ImportError:
+        _log.warning(
+            "ddtrace is not installed -- LLM Observability disabled. "
+            "Install it with: pip install 'ddtrace>=2.8'"
+        )
         return False
 
+    # Surface the caller's tags to Datadog as global span tags so they are
+    # filterable alongside the LLM Obs spans.
+    if tags:
+        existing = os.environ.get("DD_TAGS", "").strip()
+        joined = ",".join(str(t) for t in tags)
+        os.environ["DD_TAGS"] = f"{existing},{joined}" if existing else joined
 
-def record_cfo_decision(
-    decision_id: str,
-    task_type: str,
-    agents: list[str],
-    total_cost_usd: Optional[float] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Record a CFO decision event for cost tracking."""
-    if not _AGENTOPS_AVAILABLE:
-        return
-    try:
-        agentops.record(
-            event_type="cfo_decision",
-            event_properties={
-                "decision_id": decision_id,
-                "task_type": task_type,
-                "agents": agents,
-                "total_cost_usd": total_cost_usd,
-                **(metadata or {}),
-            },
-        )
-    except Exception:
-        pass
-
-
-def record_chp_gate(
-    decision_id: str,
-    gate: str,
-    score: float,
-    passed: bool,
-) -> None:
-    """Record a CHP gate evaluation event."""
-    if not _AGENTOPS_AVAILABLE:
-        return
-    try:
-        agentops.record(
-            event_type="chp_gate",
-            event_properties={
-                "decision_id": decision_id,
-                "gate": gate,
-                "score": score,
-                "passed": passed,
-            },
-        )
-    except Exception:
-        pass
-
-
-@contextmanager
-def track_agent_turn(agent_name: str, task: str, **kwargs):
-    """Context manager that tracks an agent turn with cost and timing."""
-    start = time.time()
-    session_data: Dict[str, Any] = {
-        "agent": agent_name,
-        "task": task,
-        "start_time": start,
-        **kwargs,
-    }
-    try:
-        yield session_data
-    finally:
-        session_data["duration_s"] = time.time() - start
-        if _AGENTOPS_AVAILABLE:
-            try:
-                agentops.record(
-                    event_type="agent_turn",
-                    event_properties=session_data,
-                )
-            except Exception:
-                pass
-
-
-def get_session_summary() -> Dict[str, Any]:
-    """Get summary of the current observability session."""
-    if not _AGENTOPS_AVAILABLE:
-        return {"status": "agentops_not_installed"}
-    try:
-        return {
-            "status": "active",
-            "session_id": agentops.get_current_session_id(),
-        }
-    except Exception:
-        return {"status": "error"}
+    LLMObs.enable(
+        ml_app=os.getenv("DD_LLMOBS_ML_APP") or default_ml_app,
+        agentless_enabled=True,
+    )
+    _initialized = True
+    _log.info("Datadog LLM Observability enabled (agentless).")
+    return True
