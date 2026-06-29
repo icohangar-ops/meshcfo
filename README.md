@@ -2,6 +2,8 @@
 
 # MeshCFO
 
+> **Cubiczan stack** — [Profile](https://github.com/Cubiczan) · [CHP](https://github.com/Cubiczan/consensus-hardening-protocol) · **You are here:** `meshcfo`
+
 **The auditable multi-agent CFO.** Every board-ready claim traces to the agent that produced it, the reasoning step, the grounding source, and the adversarial review that tested it.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
@@ -66,7 +68,7 @@ brief → DecisionCase + CHP foundation disclosure + attack
 ## Quick Start
 
 ```bash
-git clone https://github.com/icohangar-ops/meshcfo.git
+git clone https://github.com/Cubiczan/meshcfo.git
 cd meshcfo
 pip install -e .
 
@@ -225,6 +227,15 @@ MeshCFO is part of a growing ecosystem of multi-agent systems. These complementa
 - **[raga-ai-hub/RagaAI-Catalyst](https://github.com/raga-ai-hub/RagaAI-Catalyst)** (16K stars) – Agent tracing and evaluation platform.
 
 ---
+
+---
+
+## Cubiczan stack
+
+| Finance | [Strata](https://github.com/Cubiczan/Strata) · [Metabocommand](https://github.com/Cubiczan/Metabocommand) · [meshcfo](https://github.com/Cubiczan/meshcfo) · [working-capital-optimizer](https://github.com/Cubiczan/working-capital-optimizer) · [cash-flow-optimizer](https://github.com/Cubiczan/cash-flow-optimizer) · [finance-cockpit](https://github.com/Cubiczan/finance-cockpit) |
+| Governance | [consensus-hardening-protocol](https://github.com/Cubiczan/consensus-hardening-protocol) · [agent-conductor](https://github.com/Cubiczan/agent-conductor) · [compliance-as-code-agent](https://github.com/Cubiczan/compliance-as-code-agent) · [cleanmandate](https://github.com/Cubiczan/cleanmandate) |
+
+MeshCFO wraps every CFO session in **CHP** — pair with [Strata](https://github.com/Cubiczan/Strata) for maturity roadmaps and [Metabocommand](https://github.com/Cubiczan/Metabocommand) for operational approval queues.
 
 ## License
 
