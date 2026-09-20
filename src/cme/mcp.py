@@ -12,6 +12,7 @@ from cme.audit import AuditLedger
 from cme.cfo_os import BoardBrief, CFOOperatingSystem, ForecastBrief, InvestmentBrief
 from cme.chp import DecisionRegistry
 from cme.context import ContextEngine
+from cme.hardening import ChpGateSettings, DecisionLedger
 
 
 JsonValue = dict[str, Any] | list[Any] | str | int | float | bool | None
@@ -31,6 +32,8 @@ class MeshCFOState:
         self.registry_path = registry_path
         self.registry = DecisionRegistry.load(registry_path) if registry_path.exists() else DecisionRegistry()
         self.ledger = AuditLedger()
+        # CHP decision ledger (append-only JSONL, integrity re-checked on read).
+        self.decisions = DecisionLedger(ChpGateSettings.from_env().decisions_path)
 
     def save(self) -> None:
         self.registry.save(self.registry_path)
@@ -104,6 +107,7 @@ def serve(registry_path: str = ".chp_registry.json") -> None:
                         "base_opex_usd": {"type": "number"},
                         "growth_assumption_pct": {"type": "number"},
                         "churn_assumption_pct": {"type": "number"},
+                        "confirmed_by": {"type": "string"},
                     },
                     "required": ["title", "company", "problem"],
                 },
@@ -117,7 +121,7 @@ def serve(registry_path: str = ".chp_registry.json") -> None:
                     churn_assumption_pct=float(args.get("churn_assumption_pct", 0.08)),
                     strategic_priorities=list(args.get("strategic_priorities", [])),
                     constraints=list(args.get("constraints", [])),
-                )),
+                ), confirmed_by=args.get("confirmed_by")),
             ),
             ToolSpec(
                 name="investment_case",
@@ -149,7 +153,7 @@ def serve(registry_path: str = ".chp_registry.json") -> None:
                     key_risks=list(args.get("key_risks", [])),
                     strategic_priorities=list(args.get("strategic_priorities", [])),
                     constraints=list(args.get("constraints", [])),
-                )),
+                ), confirmed_by=args.get("confirmed_by")),
             ),
             ToolSpec(
                 name="board_output",
@@ -165,6 +169,7 @@ def serve(registry_path: str = ".chp_registry.json") -> None:
                         "open_questions": {"type": "array", "items": {"type": "string"}},
                         "prior_board_decisions": {"type": "array", "items": {"type": "string"}},
                         "strategic_risks": {"type": "array", "items": {"type": "string"}},
+                        "confirmed_by": {"type": "string"},
                     },
                     "required": ["title", "company", "problem"],
                 },
@@ -179,7 +184,7 @@ def serve(registry_path: str = ".chp_registry.json") -> None:
                     strategic_risks=list(args.get("strategic_risks", [])),
                     strategic_priorities=list(args.get("strategic_priorities", [])),
                     constraints=list(args.get("constraints", [])),
-                )),
+                ), confirmed_by=args.get("confirmed_by")),
             ),
             ToolSpec(
                 name="lock",
@@ -197,12 +202,28 @@ def serve(registry_path: str = ".chp_registry.json") -> None:
                 },
                 handler=lambda args: _lock_case(state, args),
             ),
+            ToolSpec(
+                name="decisions",
+                description=(
+                    "Read CHP decision-ledger records — the durable, integrity-checked "
+                    "audit of every gated CFO session (list, or get by decision id)."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "decision_id": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": [],
+                },
+                handler=lambda args: _read_decisions(state, args),
+            ),
         ],
     )
     server.serve()
 
 
-def _run_session(state: MeshCFOState, brief: Any) -> dict[str, Any]:
+def _run_session(state: MeshCFOState, brief: Any, confirmed_by: str | None = None) -> dict[str, Any]:
     system = CFOOperatingSystem(
         agents=_default_agents(),
         registry=state.registry,
@@ -210,7 +231,7 @@ def _run_session(state: MeshCFOState, brief: Any) -> dict[str, Any]:
         ledger=state.ledger,
         company_name=brief.company,
     )
-    report = system.run(brief)
+    report = system.run(brief, confirmed_by=confirmed_by)
     state.save()
     return {
         "task": brief.task_type.value,
@@ -219,11 +240,23 @@ def _run_session(state: MeshCFOState, brief: Any) -> dict[str, Any]:
         "foundation_score": report.case.foundation_score,
         "r0_verdict": report.r0_verdict.value,
         "foundation_verdict": report.foundation_verdict.value,
+        "chp": report.hardening,
         "initial_packet": report.initial_packet,
         "artifact_markdown": report.artifact.render(),
         "audit_markdown": report.audit.render(),
         "case": report.case.to_dict(),
     }
+
+
+def _read_decisions(state: MeshCFOState, args: dict[str, Any]) -> Any:
+    """Read decision-ledger records; every read re-validates integrity."""
+    decision_id = args.get("decision_id")
+    if decision_id:
+        record = state.decisions.get(str(decision_id))
+        if record is None:
+            raise KeyError(f"unknown decision_id: {decision_id}")
+        return record
+    return state.decisions.list(limit=int(args.get("limit", 20)))
 
 
 def _lock_case(state: MeshCFOState, args: dict[str, Any]) -> dict[str, Any]:

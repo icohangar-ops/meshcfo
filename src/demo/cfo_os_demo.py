@@ -2,6 +2,12 @@
 
 Runs the same three Mesh agents (Finance, Strategy, Compliance) under CHP
 hardening across all three CFO task types, and prints each session report.
+
+Every session runs through the CHP decision gate (``cme.hardening``): R0
+before the orchestration, deterministic adversary scoring with golden parity,
+and a human lock. The demo names ``demo-operator`` as the confirmer so it
+stays runnable out of the box; in production the confirmer is a named human
+(and MESH_CFO_CHP_REQUIRE_HUMAN_LOCK defaults on to demand one).
 """
 from __future__ import annotations
 
@@ -12,6 +18,8 @@ from cme.cfo_os import (
     InvestmentBrief,
 )
 from demo import ComplianceAgent, FinanceAgent, StrategyAgent
+
+DEMO_CONFIRMER = "demo-operator"
 
 
 def run_investment_demo(cfo: CFOOperatingSystem) -> str:
@@ -30,7 +38,7 @@ def run_investment_demo(cfo: CFOOperatingSystem) -> str:
         key_risks=["Adoption lag", "Implementation complexity"],
         strategic_priorities=["Expand enterprise ARR", "Preserve capital discipline"],
     )
-    return cfo.run(brief).render()
+    return cfo.run(brief, confirmed_by=DEMO_CONFIRMER).render()
 
 
 def run_forecast_demo(cfo: CFOOperatingSystem) -> str:
@@ -46,7 +54,7 @@ def run_forecast_demo(cfo: CFOOperatingSystem) -> str:
         current_runway_months=20,
         strategic_priorities=["Net dollar retention >= 115%"],
     )
-    return cfo.run(brief).render()
+    return cfo.run(brief, confirmed_by=DEMO_CONFIRMER).render()
 
 
 def run_board_demo(cfo: CFOOperatingSystem) -> str:
@@ -67,7 +75,7 @@ def run_board_demo(cfo: CFOOperatingSystem) -> str:
         strategic_risks=["Adoption ramp slope", "Compliance scope creep"],
         strategic_priorities=["Expand enterprise ARR", "Preserve capital discipline"],
     )
-    return cfo.run(brief).render()
+    return cfo.run(brief, confirmed_by=DEMO_CONFIRMER).render()
 
 
 def main() -> int:

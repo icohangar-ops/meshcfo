@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "description": "Golden QA baseline for CHP parity in meshcfo. Each case pins a canonical CFO brief (normalized title + task type) to the headline number the rendered board-ready artifact must carry. Parity mismatch is fatal: a claim contradicting this file must not be issued — fix the driver inputs or regenerate the set deliberately. Modeled on erp-control-plane's analytics/evals/golden_qa.yaml.",
+  "cases": [
+    {
+      "id": "demo_investment_enterprise_tier",
+      "task_type": "investment_case",
+      "title": "Fund enterprise tier Q3",
+      "metric": "investment_amount_usd",
+      "unit": "usd",
+      "expected": 4000000,
+      "tolerance": 0.005
+    },
+    {
+      "id": "demo_forecast_fy26",
+      "task_type": "forecast",
+      "title": "FY26 driver-based plan",
+      "metric": "base_revenue_usd",
+      "unit": "usd",
+      "expected": 42000000,
+      "tolerance": 0.005
+    },
+    {
+      "id": "demo_board_enterprise_expansion",
+      "task_type": "board_output",
+      "title": "Q3 board: enterprise expansion",
+      "metric": "board_options_count",
+      "unit": "count",
+      "expected": 3,
+      "tolerance": 0.0
+    }
+  ]
+}

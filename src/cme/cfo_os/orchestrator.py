@@ -21,7 +21,7 @@ markdown document.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from cme.agent import MeshAgent, TurnResult
 from cme.audit import AuditLedger
@@ -43,6 +43,7 @@ from cme.chp.payloads import build_payload_envelope
 from cme.chp.registry import DecisionRegistry
 from cme.chp.validators import apply_third_party_validation
 from cme.context import ContextEngine, Entity, Task
+from cme.hardening import ChpDecisionGate, ChpRejection
 from cme.orchestrator import EnterpriseOrchestrator, OrchestrationReport
 
 from cme.cfo_os.artifacts import (
@@ -72,6 +73,7 @@ class CFOSessionReport:
     artifact: CFOArtifact
     audit: AuditTrail
     turns: List[TurnResult] = field(default_factory=list)
+    hardening: Optional[Dict[str, Any]] = None
 
     def render(self) -> str:
         sections = [
@@ -87,14 +89,40 @@ class CFOSessionReport:
             "",
             self.audit.render(),
             "",
-            "## Initial CHP Packet",
-            "```",
-            self.initial_packet,
-            "```",
-            "",
-            "## Mesh Orchestration Detail",
-            self.orchestration.render(),
         ]
+        if self.hardening:
+            parity = self.hardening.get("parity")
+            parity_line = (
+                f"- golden parity: {parity['case_id']} ({parity['metric']}) expected "
+                f"{parity['expected']} {parity['unit']}, got {parity['actual']} — "
+                + ("within tolerance" if parity["within_tolerance"] else "MISMATCH")
+                if parity
+                else "- golden parity: no golden QA case matched this brief"
+            )
+            sections.extend(
+                [
+                    "## CHP Decision Gate",
+                    f"- decision_id: `{self.hardening['decision_id']}`  ·  session status: "
+                    f"**{self.hardening['session_status']}**",
+                    f"- gate R0: `{self.hardening['r0_verdict']}`  ·  gate foundation: "
+                    f"`{self.hardening['foundation_verdict']}`  ·  score: "
+                    f"{self.hardening['foundation_score']}  ·  domain: {self.hardening['domain']}",
+                    parity_line,
+                    f"- confirmed_by: {self.hardening['confirmed_by'] or '(pending human confirmation)'}",
+                    "",
+                ]
+            )
+        sections.extend(
+            [
+                "## Initial CHP Packet",
+                "```",
+                self.initial_packet,
+                "```",
+                "",
+                "## Mesh Orchestration Detail",
+                self.orchestration.render(),
+            ]
+        )
         return "\n".join(sections)
 
 
@@ -109,6 +137,7 @@ class CFOOperatingSystem:
         context: Optional[ContextEngine] = None,
         company_name: str = "Aperture Corp",
         ledger: Optional[AuditLedger] = None,
+        gate: Optional[ChpDecisionGate] = None,
     ) -> None:
         if not agents:
             raise ValueError("CFOOperatingSystem requires at least one MeshAgent")
@@ -118,6 +147,10 @@ class CFOOperatingSystem:
         self.company_name = company_name
         # One signed ledger for the whole session (mesh turns + final artifact).
         self.ledger = ledger if ledger is not None else AuditLedger()
+        # CHP decision gate (consensus-hardening-protocol): R0 before the
+        # orchestration, deterministic adversary over the produced artifact,
+        # human lock, and the append-only decision ledger.
+        self.gate = gate if gate is not None else ChpDecisionGate()
         self._chp = CHPOrchestrator(registry=self.registry, context=self.context)
         self._mesh = EnterpriseOrchestrator(
             agents=self.agents, context=self.context, ledger=self.ledger
@@ -125,8 +158,13 @@ class CFOOperatingSystem:
 
     # --- Public API ------------------------------------------------------
 
-    def run(self, brief: CFOBrief) -> CFOSessionReport:
+    def run(self, brief: CFOBrief, *, confirmed_by: Optional[str] = None) -> CFOSessionReport:
         case, disclosure, attack = build_decision_case(brief)
+
+        # CHP R0 — before the engine: an ill-posed brief is refused before any
+        # agent runs, with nothing executed or persisted.
+        self._chp_guarded(brief, case, lambda: self.gate.open_r0(brief, case))
+
         self._seed_context(brief, case)
 
         chp_report = self._chp.run_initial_session(
@@ -144,6 +182,28 @@ class CFOOperatingSystem:
         self._advance_lock_state(chp_report.case, chp_report.foundation_verdict, orchestration.turns)
 
         artifact = self._build_artifact(brief, chp_report.case, orchestration.turns)
+
+        # CHP foundation pass — the deterministic adversary scores the produced
+        # artifact (guardrails 40 + bounded result 30 + golden parity 30).
+        decision = self._chp_guarded(
+            brief,
+            case,
+            lambda: self.gate.harden(
+                brief=brief,
+                case=case,
+                disclosure=disclosure,
+                artifact=artifact,
+                orchestration=orchestration,
+            ),
+        )
+
+        # Human lock policy — refusals land before anything durable is written.
+        self._chp_guarded(
+            brief, case, lambda: self.gate.enforce_lock_policy(decision, confirmed_by)
+        )
+        if confirmed_by:
+            self.gate.lock(decision, confirmed_by)
+
         audit = build_audit_trail(
             turns=orchestration.turns,
             case=chp_report.case,
@@ -163,6 +223,28 @@ class CFOOperatingSystem:
             rationale=f"lock_state={chp_report.case.status.value}; "
             f"foundation_score={chp_report.case.foundation_score}",
         )
+        # Seal the CHP decision record into the append-only decision ledger.
+        record = self.gate.record(
+            decision,
+            brief=brief,
+            artifact=artifact,
+            orchestration=orchestration,
+            confirmed_by=confirmed_by,
+        )
+
+        hardening = {
+            "decision_id": decision.case.decision_id,
+            "session_status": decision.case.status.value,
+            "r0_verdict": decision.report.r0_verdict.value,
+            "foundation_verdict": decision.report.foundation_verdict.value,
+            "foundation_score": decision.case.foundation_score,
+            "domain": decision.assessment.domain,
+            "parity": decision.assessment.parity.to_dict()
+            if decision.assessment.parity
+            else None,
+            "confirmed_by": confirmed_by,
+            "ledger_body_sha256": record["body_sha256"],
+        }
 
         return CFOSessionReport(
             brief=brief,
@@ -176,7 +258,27 @@ class CFOOperatingSystem:
             artifact=artifact,
             audit=audit,
             turns=orchestration.turns,
+            hardening=hardening,
         )
+
+    def _chp_guarded(self, brief: CFOBrief, case: DecisionCase, step):
+        """Run a CHP gate stage; audit the refusal, then re-raise."""
+        try:
+            return step()
+        except ChpRejection as exc:
+            self.ledger.append(
+                event="chp_rejected",
+                actor="cfo_os",
+                inputs={
+                    "decision_id": case.decision_id,
+                    "task_type": brief.task_type.value,
+                    "title": brief.title,
+                },
+                sources=[],
+                confidence="HALT",
+                rationale=exc.reason,
+            )
+            raise
 
     def lock(
         self,
@@ -200,6 +302,14 @@ class CFOOperatingSystem:
             rationale=rationale,
         )
         apply_third_party_validation(case, validation)
+        # Durable decision-ledger event: a post-run lock (or rejection) is
+        # appended so the ledger reflects the case's current lock state.
+        self.gate.record_lock(
+            decision_id=decision_id,
+            session_status=case.status.value,
+            confirmed_by=validator,
+            rationale=rationale,
+        )
         return case
 
     # --- Internals -------------------------------------------------------

@@ -105,17 +105,18 @@ cfo = CFOOperatingSystem(
 )
 
 report = cfo.run(InvestmentBrief(
-    title="Fund enterprise tier",
+    title="Fund enterprise tier Q3",
     company="Acme",
     problem="Should we fund a dedicated enterprise tier this quarter?",
-    investment_amount_usd=2_500_000,
+    investment_amount_usd=4_000_000,
     expected_payback_months=14,
     current_runway_months=18,
     expected_upside=["Higher ACV"],
     key_risks=["Adoption lag"],
-))
+), confirmed_by="finance-lead")
 
 print(report.case.status.value)        # PROVISIONAL_LOCK
+print(report.hardening)                # CHP gate summary (R0, parity, lock state)
 print(report.artifact.render())        # board-ready memo
 print(report.audit.render())           # per-claim provenance
 
@@ -224,6 +225,54 @@ intact, first_tampered_index = ledger.verify()  # (True, None) when clean
 
 The ledger is wired into `EnterpriseOrchestrator` and `CFOOperatingSystem` — no
 extra code is required; running a session signs every turn automatically.
+
+---
+
+## CHP Decision Gate
+
+On top of the signed audit ledger, every CFO OS session runs through the
+**Consensus Hardening Protocol** (`consensus-hardening-protocol` package,
+wired in `src/cme/hardening.py`) before its board-ready claim can be issued:
+
+1. **R0 — before the engine.** The brief is checked for solvability, scope,
+   validity, and worth (`Solvable` / `Scoped` / `Valid` / `Worth_it`, failures
+   report `FATAL`). A refused brief never reaches the agents: nothing runs,
+   nothing persists.
+2. **Deterministic adversary — after the artifact.** The rendered board-ready
+   artifact is scored by a deterministic pass, not an LLM:
+   guardrails 40 (no overclaims, grounded claims, specificity) +
+   bounded result 30 (a comparable headline number exists) +
+   golden parity 30 (the number matches `evals/golden_qa.json`, the pinned
+   QA baseline for canonical briefs).
+3. **Domain floors.** Board-ready financial claims gate at the finance floor:
+   `finance` / `capital_allocation` / `board_decision` sessions need ≥ 100 —
+   i.e. full guardrails + bounded result + golden parity. A floor breach is
+   fatal; a named confirmer cannot cure it, and a parity mismatch is fatal
+   even with one.
+4. **Human lock.** Sessions open `EXPLORING` and transition explicitly to
+   `PROVISIONAL_LOCK`; `LOCKED` requires a named human confirmer
+   (`confirmed_by`) applied via third-party validation. While
+   `MESH_CFO_CHP_REQUIRE_HUMAN_LOCK` is on (default), an unconfirmed session
+   is refused outright.
+5. **Decision ledger.** Each gated session is sealed as a CHP payload
+   envelope into an append-only JSONL ledger. CHP's envelope validation is
+   structure-only, so the ledger also stores a SHA-256 `body_sha256` of the
+   record body and re-validates both on every read — a tampered body reads
+   back with `integrity_valid: false`.
+
+Read the ledger back with `cfo-os decisions [--decision-id ID]` or the MCP
+server's `decisions` tool.
+
+**Environment controls** (see `.env.example`):
+
+- `MESH_CFO_CHP_REQUIRE_HUMAN_LOCK` — default `1` (fail-closed). Set `0` only
+  to let unconfirmed sessions hold at `PROVISIONAL_LOCK`.
+- `MESH_CFO_CHP_DECISIONS_PATH` — decision-ledger location
+  (default `.meshcfo/chp_decisions.jsonl`).
+- `MESH_CFO_CHP_GOLDEN_PATH` — golden QA baseline
+  (default `evals/golden_qa.json`). If a canonical brief's headline number
+  disagrees with this file, the session is refused — regenerate the baseline
+  deliberately, never silently.
 
 ---
 

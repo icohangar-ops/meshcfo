@@ -20,6 +20,7 @@ from cme.mcp import main as _mcp_main
 from cme.chp import CHPOrchestrator, DecisionRegistry, Phase, ThirdPartyValidation, ValidationResult
 from cme.context import ContextEngine, Entity, Task
 from cme.finance import CapitalAllocationInput, build_capital_allocation_case
+from cme.hardening import ChpGateSettings, ChpRejection, DecisionLedger
 from cme.orchestrator import EnterpriseOrchestrator
 
 
@@ -285,7 +286,11 @@ def _cmd_cfo_os(args: argparse.Namespace) -> int:
             strategic_risks=args.risk,
         )
 
-    report = cfo.run(brief)
+    try:
+        report = cfo.run(brief, confirmed_by=args.confirmed_by)
+    except ChpRejection as exc:
+        sys.stderr.write(f"[CHP REFUSED] {exc.reason}\n")
+        return 2
     registry.save(_registry_path(args))
 
     if args.json:
@@ -296,6 +301,7 @@ def _cmd_cfo_os(args: argparse.Namespace) -> int:
             "foundation_score": report.case.foundation_score,
             "r0_verdict": report.r0_verdict.value,
             "foundation_verdict": report.foundation_verdict.value,
+            "chp": report.hardening,
             "artifact_markdown": report.artifact.render(),
             "audit_entries": [
                 {
@@ -325,6 +331,21 @@ def _cmd_cfo_os(args: argparse.Namespace) -> int:
 
 def _cmd_mcp(args: argparse.Namespace) -> int:
     _mcp_main(["--registry", args.registry])
+    return 0
+
+
+def _cmd_decisions(args: argparse.Namespace) -> int:
+    """Read the CHP decision ledger; reads re-validate envelope + body digest."""
+    ledger = DecisionLedger(ChpGateSettings.from_env().decisions_path)
+    if args.decision_id:
+        record = ledger.get(args.decision_id)
+        if record is None:
+            sys.stderr.write(f"[no decision record for {args.decision_id}]\n")
+            return 1
+        sys.stdout.write(json.dumps(record, indent=2, default=str) + "\n")
+    else:
+        records = ledger.list(limit=args.limit)
+        sys.stdout.write(json.dumps(records, indent=2, default=str) + "\n")
     return 0
 
 
@@ -410,6 +431,14 @@ def build_parser() -> argparse.ArgumentParser:
     cfo.add_argument("--company", default="Aperture Corp")
     cfo.add_argument("--problem", required=True)
     cfo.add_argument("--owner", default="cfo")
+    cfo.add_argument(
+        "--confirmed-by",
+        default=None,
+        help=(
+            "Named human confirmer for the CHP human lock. Required for every "
+            "board-ready session while MESH_CFO_CHP_REQUIRE_HUMAN_LOCK is on (default)."
+        ),
+    )
     cfo.add_argument("--origin-model", default="GPT-5.4")
     cfo.add_argument("--partner-model", default="GPT-5-equivalent")
     cfo.add_argument("--partner-system", default="Partner")
@@ -440,6 +469,14 @@ def build_parser() -> argparse.ArgumentParser:
     mcp = sub.add_parser("mcp", help="Run the stdio MCP server for MeshCFO.")
     mcp.add_argument("--registry", default=".chp_registry.json")
     mcp.set_defaults(func=_cmd_mcp)
+
+    dec = sub.add_parser(
+        "decisions",
+        help="Read CHP decision-ledger records (integrity re-validated on read).",
+    )
+    dec.add_argument("--decision-id", default=None, help="Read the newest record for one decision id.")
+    dec.add_argument("--limit", type=int, default=20, help="How many newest records to list.")
+    dec.set_defaults(func=_cmd_decisions)
 
     return p
 

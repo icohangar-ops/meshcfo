@@ -28,17 +28,17 @@ def _cfo_os() -> CFOOperatingSystem:
 def test_investment_case_runs_three_agents_and_advances_lock():
     cfo = _cfo_os()
     brief = InvestmentBrief(
-        title="Fund enterprise tier",
+        title="Fund enterprise tier Q3",
         company="Acme",
         problem="Should we fund a dedicated enterprise tier this quarter?",
-        investment_amount_usd=2_500_000,
+        investment_amount_usd=4_000_000,
         expected_payback_months=14,
         minimum_runway_months=12,
         current_runway_months=18,
         expected_upside=["Higher ACV"],
         key_risks=["Adoption lag"],
     )
-    report = cfo.run(brief)
+    report = cfo.run(brief, confirmed_by="finance-lead")
 
     assert report.brief.task_type == CFOTaskType.INVESTMENT_CASE
     assert isinstance(report.artifact, InvestmentCaseMemo)
@@ -52,15 +52,15 @@ def test_investment_case_runs_three_agents_and_advances_lock():
 def test_forecast_brief_produces_forecast_pack():
     cfo = _cfo_os()
     brief = ForecastBrief(
-        title="FY26 plan",
+        title="FY26 driver-based plan",
         company="Acme",
         problem="Build the FY26 driver-based plan.",
-        base_revenue_usd=20_000_000,
+        base_revenue_usd=42_000_000,
         base_opex_usd=15_000_000,
         growth_assumption_pct=0.30,
         churn_assumption_pct=0.08,
     )
-    report = cfo.run(brief)
+    report = cfo.run(brief, confirmed_by="fpna-lead")
     assert isinstance(report.artifact, ForecastPack)
     assert report.case.domain == "forecast"
     rendered = report.artifact.render()
@@ -71,7 +71,7 @@ def test_forecast_brief_produces_forecast_pack():
 def test_board_brief_produces_board_output_with_options():
     cfo = _cfo_os()
     brief = BoardBrief(
-        title="Q3 board approval",
+        title="Q3 board: enterprise expansion",
         company="Acme",
         problem="Approve the enterprise expansion plan.",
         options=["Approve", "Defer", "Reject"],
@@ -79,7 +79,7 @@ def test_board_brief_produces_board_output_with_options():
         open_questions=["Pipeline confidence?"],
         strategic_risks=["Adoption ramp"],
     )
-    report = cfo.run(brief)
+    report = cfo.run(brief, confirmed_by="board-secretary")
     assert isinstance(report.artifact, BoardOutput)
     assert report.case.domain == "board_decision"
     rendered = report.artifact.render()
@@ -90,15 +90,15 @@ def test_board_brief_produces_board_output_with_options():
 def test_lock_progression_via_third_party_validation():
     cfo = _cfo_os()
     brief = InvestmentBrief(
-        title="Fund platform team",
+        title="Fund enterprise tier Q3",
         company="Acme",
         problem="Should we fund a platform team next quarter?",
-        investment_amount_usd=1_500_000,
-        expected_payback_months=12,
+        investment_amount_usd=4_000_000,
+        expected_payback_months=14,
         minimum_runway_months=12,
         current_runway_months=18,
     )
-    report = cfo.run(brief)
+    report = cfo.run(brief, confirmed_by="finance-lead")
     assert report.case.status == SessionStatus.PROVISIONAL_LOCK
 
     case = cfo.lock(
@@ -116,15 +116,15 @@ def test_lock_progression_via_third_party_validation():
 def test_audit_trail_links_each_agent_to_expansion_steps():
     cfo = _cfo_os()
     brief = InvestmentBrief(
-        title="Audit smoke",
+        title="Fund enterprise tier Q3",
         company="Acme",
         problem="Audit smoke test.",
-        investment_amount_usd=1_000_000,
-        expected_payback_months=10,
+        investment_amount_usd=4_000_000,
+        expected_payback_months=14,
         minimum_runway_months=12,
         current_runway_months=20,
     )
-    report = cfo.run(brief)
+    report = cfo.run(brief, confirmed_by="internal-audit")
     agents_in_audit = {e.agent for e in report.audit.entries}
     assert agents_in_audit == {"finance", "strategy", "compliance"}
     # Each agent contributes at least an expansion step + a final recommendation entry.
