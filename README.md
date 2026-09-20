@@ -332,3 +332,17 @@ MeshCFO wraps every CFO session in **CHP** — pair with [Strata](https://github
 ## License
 
 MIT. See [`LICENSE`](./LICENSE).
+
+## Propagation decisions
+
+Decisions from the portfolio propagation matrix (SecOps/Gov wave C), recorded
+per the adopt-or-reverse contract. Revisit triggers are binding.
+
+### Row 35 — rubric chain: REVERSED
+
+meshcfo already locks provenance in the audit ledger and hardening modules (src/cme/audit/ledger.py, src/cme/cfo_os/audit.py, src/cme/hardening.py); a rubric chain would be a strictly weaker duplicate of an enforced mechanism.
+
+**Revisit trigger:** a genuinely subjective quality dimension appears in this
+repo's output that no deterministic gate can decide (e.g. prose quality in
+user-facing deliverables). Then author the rubric against the canonical
+chain shape rather than a local one.
