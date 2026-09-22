@@ -35,6 +35,12 @@ from cme.cfo_os.artifacts import (
 )
 from cme.cfo_os.audit import AuditTrail, AuditEntry
 from cme.cfo_os.orchestrator import CFOOperatingSystem, CFOSessionReport
+from cme.cfo_os.value_pools import (
+    EvidenceReference,
+    GovernedValuePoolPacket,
+    ValuePool,
+    adapt_value_pool_packet,
+)
 
 __all__ = [
     "AuditEntry",
@@ -50,4 +56,8 @@ __all__ = [
     "ForecastPack",
     "InvestmentBrief",
     "InvestmentCaseMemo",
+    "EvidenceReference",
+    "GovernedValuePoolPacket",
+    "ValuePool",
+    "adapt_value_pool_packet",
 ]
